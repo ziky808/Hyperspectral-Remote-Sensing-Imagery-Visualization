@@ -40,6 +40,20 @@ data/Salinas_gt.mat
 
 说明：原始 `.mat` 数据文件较大，仓库中没有上传，需要按上述方式自行下载。
 
+## 数据集与光谱含义
+
+本项目默认使用的 Salinas scene 是 AVIRIS 传感器获取的高光谱数据。`Salinas_corrected.mat` 的空间尺寸为 `512 x 217`，包含 `204` 个有效波段。原始 AVIRIS 数据通常有 `224` 个波段，EHU 提供的 corrected 版本去除了部分水汽吸收等噪声波段，因此剩余 `204` 个波段。
+
+需要注意的是，EHU 页面提供的 Salinas 数据通常表述为 **at-sensor radiance data**。因此，本项目中光谱曲线纵轴默认写作：
+
+```text
+Mean at-sensor radiance value (a.u.)
+```
+
+也就是平均传感器接收辐亮度/数据值，单位以任意单位 `a.u.` 表示。除非额外进行大气校正或反射率标定，否则不应把它严格表述为地表反射率。
+
+由于 `.mat` 文件中没有直接保存每个波段的中心波长，本项目在绘制 Salinas 光谱曲线时使用 AVIRIS 常见范围 `400 nm - 2500 nm` 做线性近似，并删除 EHU corrected 数据中被去除的波段，从而得到 `204` 个近似波长位置。该处理主要用于增强图像解读和汇报表达；如果有传感器官方精确波长表，应优先替换为官方波长。
+
 ## 环境安装
 
 建议使用虚拟环境：
@@ -80,6 +94,20 @@ data/Salinas_corrected.mat
 T2/1.png
 ```
 
+`T2/1.py` 默认采用假彩色合成。对于 Salinas corrected 数据，默认波段组合为：
+
+```text
+R = 第 57 波段，约 927 nm，近红外
+G = 第 27 波段，约 645 nm，红光
+B = 第 17 波段，约 551 nm，绿光
+```
+
+该组合相当于“近红外-红-绿”假彩色合成，常用于突出植被差异。显示前会对每个通道做 `2% - 98%` 百分位拉伸，减少极端值对显示效果的影响。若希望使用普通 min-max 拉伸，也可以运行：
+
+```bash
+python T2/1.py --stretch minmax
+```
+
 ### 2. 生成典型地物光谱曲线图
 
 运行：
@@ -99,6 +127,18 @@ data/Salinas_gt.mat
 
 ```text
 T2/2.png
+```
+
+`T2/2.py` 默认使用近似波长作为横轴，而不是仅使用波段编号。若只想显示波段编号，可以运行：
+
+```bash
+python T2/2.py --x-axis band
+```
+
+光谱曲线默认绘制原始平均辐亮度/数据值，不做归一化。若只比较曲线形状、弱化不同地物整体亮度差异，可以使用 min-max 归一化：
+
+```bash
+python T2/2.py --normalize minmax
 ```
 
 ## 代码文件说明
@@ -162,6 +202,12 @@ spectrum = spectra.mean(axis=0)
 python T2/1.py --bands 57 27 17
 ```
 
+手动指定显示拉伸方式：
+
+```bash
+python T2/1.py --stretch minmax
+```
+
 手动指定要绘制的地物类别：
 
 ```bash
@@ -172,6 +218,12 @@ python T2/2.py --classes 1,6,8,10,15
 
 ```bash
 python T2/2.py --max-pixels 500
+```
+
+按曲线形状进行归一化显示：
+
+```bash
+python T2/2.py --normalize minmax
 ```
 
 ## 更换数据集
@@ -191,6 +243,25 @@ python T2/2.py --cube data/example.mat --gt data/example_gt.mat --cube-variable 
 ```
 
 注意：如果数据集没有 ground truth 标注文件，只能运行 `T2/1.py` 生成影像可视化图，不能按地物类别绘制光谱曲线。
+
+## 学术注意事项与可改进方向
+
+本项目已经完成题目要求的两个核心输出，但如果面向高光谱遥感方向的进一步考察，还可以从以下方面继续增强：
+
+1. **精确波长表**  
+   当前 Salinas 光谱曲线横轴使用 AVIRIS `400 nm - 2500 nm` 范围的线性近似波长，并根据 EHU corrected 数据删除水汽吸收等无效波段。该做法适合本题可视化汇报，但如果要写正式论文或进一步分析，应使用 AVIRIS 官方 band center wavelength 表。
+
+2. **辐亮度与反射率区分**  
+   当前曲线默认显示 at-sensor radiance/data value，不能直接等同于地表反射率。若要比较真实材料光谱特征，应进一步做辐射定标、大气校正或使用已经转为 reflectance 的数据。
+
+3. **光谱预处理**  
+   本题使用 EHU 的 corrected 数据，已经去除了部分噪声波段。更严格的研究流程还可以加入光谱平滑、异常像元剔除、归一化或标准化等预处理，并说明每一步对曲线形态的影响。
+
+4. **分割/分类算法边界**  
+   当前 `T2/2.py` 使用官方 ground truth 标注图进行标签掩膜分割，目的是提取已知地物类别的平均光谱曲线。这不是一个新的分类模型，也不评价分类精度。如果题目进一步要求地物识别或分类，应补充 SVM、Random Forest、PCA + K-means、谱角制图 SAM 或深度学习方法，并给出 OA、AA、Kappa 等指标。
+
+5. **可视化表达**  
+   当前结果图满足 PNG 输出要求。若用于正式汇报，可进一步增加地物类别颜色表、ground truth 伪彩图、采样点位置图，以及原始光谱与归一化光谱的对比图。
 
 ## 运行内存与空间复杂度说明
 

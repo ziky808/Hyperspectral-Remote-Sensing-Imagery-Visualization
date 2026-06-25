@@ -20,7 +20,7 @@ os.environ.setdefault("MPLCONFIGDIR", str(Path(".matplotlib").resolve()))
 import matplotlib.pyplot as plt
 import numpy as np
 
-from hsi_utils import infer_dataset_key, label_for_class, load_cube, load_ground_truth, parse_classes
+from hsi_utils import infer_dataset_key, label_for_class, load_cube, load_ground_truth, parse_classes, spectral_axis
 
 
 def mean_spectrum_for_class(
@@ -43,6 +43,21 @@ def mean_spectrum_for_class(
     return spectra.mean(axis=0)
 
 
+def normalize_spectrum(spectrum: np.ndarray, method: str) -> np.ndarray:
+    arr = spectrum.astype(np.float32, copy=True)
+    if method == "minmax":
+        lo, hi = float(arr.min()), float(arr.max())
+        if hi > lo:
+            return (arr - lo) / (hi - lo)
+        return np.zeros_like(arr)
+    if method == "l2":
+        norm = float(np.linalg.norm(arr))
+        if norm > 0:
+            return arr / norm
+        return arr
+    return arr
+
+
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser()
     parser.add_argument("--cube", type=Path, default=Path("data/Salinas_corrected.mat"))
@@ -61,6 +76,18 @@ def parse_args() -> argparse.Namespace:
         default=2000,
         help="Maximum sampled pixels per class. Lower this if memory is very tight.",
     )
+    parser.add_argument(
+        "--x-axis",
+        choices=("wavelength", "band"),
+        default="wavelength",
+        help="Use approximate wavelength or band number on the spectral curve x-axis.",
+    )
+    parser.add_argument(
+        "--normalize",
+        choices=("none", "minmax", "l2"),
+        default="none",
+        help="Optional normalization for each plotted mean spectrum.",
+    )
     parser.add_argument("--seed", type=int, default=2025)
     return parser.parse_args()
 
@@ -73,16 +100,23 @@ def main() -> None:
     dataset_key = infer_dataset_key(str(args.cube), cube_variable, str(args.gt), gt_variable)
     rng = np.random.default_rng(args.seed)
 
-    x = np.arange(1, cube.shape[2] + 1)
+    x, xlabel = spectral_axis(dataset_key, cube.shape[2], prefer_wavelength=args.x_axis == "wavelength")
+    ylabel = "Mean at-sensor radiance value (a.u.)"
+    if args.normalize == "minmax":
+        ylabel = "Min-max normalized mean spectrum"
+    elif args.normalize == "l2":
+        ylabel = "L2-normalized mean spectrum"
+
     plt.figure(figsize=(10, 6), dpi=160)
     for class_id in class_ids:
         spectrum = mean_spectrum_for_class(cube, gt, class_id, args.max_pixels, rng)
+        spectrum = normalize_spectrum(spectrum, args.normalize)
         label = label_for_class(dataset_key, class_id)
         plt.plot(x, spectrum, linewidth=1.6, label=f"{class_id}: {label}")
 
-    plt.title("Representative spectral curves in Salinas scene")
-    plt.xlabel("Band number")
-    plt.ylabel("Mean reflectance value")
+    plt.title("Representative spectral profiles in Salinas scene")
+    plt.xlabel(xlabel)
+    plt.ylabel(ylabel)
     plt.grid(True, alpha=0.3)
     plt.legend(fontsize=8)
     plt.tight_layout()
@@ -93,6 +127,7 @@ def main() -> None:
     print(f"Saved spectral-curve plot to {args.output}")
     print(f"Cube variable: {cube_variable}; GT variable: {gt_variable}; shape: {cube.shape}")
     print(f"Classes: {class_ids}; max_pixels/class: {args.max_pixels}")
+    print(f"X-axis: {args.x_axis}; normalization: {args.normalize}")
 
 
 if __name__ == "__main__":

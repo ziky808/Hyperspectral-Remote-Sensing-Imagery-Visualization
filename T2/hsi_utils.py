@@ -44,6 +44,12 @@ DEFAULT_GT_NAMES = (
     "botswana_gt",
 )
 
+SALINAS_REMOVED_BANDS_1BASED = (
+    *range(108, 113),
+    *range(154, 168),
+    224,
+)
+
 
 CLASS_NAMES = {
     "indian": {
@@ -167,6 +173,72 @@ def auto_rgb_bands(band_count: int) -> tuple[int, int, int]:
     green = max(1, min(band_count, round(band_count * 0.40)))
     blue = max(1, min(band_count, round(band_count * 0.20)))
     return red, green, blue
+
+
+def aviris_wavelengths_nm(
+    total_bands: int = 224,
+    start_nm: float = 400.0,
+    end_nm: float = 2500.0,
+    removed_bands_1based: tuple[int, ...] = (),
+) -> np.ndarray:
+    """Approximate AVIRIS band-center wavelengths in nm.
+
+    EHU .mat files do not include per-band wavelength metadata. For academic
+    reporting, this approximation maps AVIRIS 224 bands linearly from
+    400 nm to 2500 nm and removes the bands documented by EHU.
+    """
+    wavelengths = np.linspace(start_nm, end_nm, total_bands, dtype=np.float32)
+    if not removed_bands_1based:
+        return wavelengths
+
+    keep = np.ones(total_bands, dtype=bool)
+    for band in removed_bands_1based:
+        if 1 <= band <= total_bands:
+            keep[band - 1] = False
+    return wavelengths[keep]
+
+
+def salinas_corrected_wavelengths_nm(band_count: int) -> np.ndarray | None:
+    wavelengths = aviris_wavelengths_nm(removed_bands_1based=SALINAS_REMOVED_BANDS_1BASED)
+    if wavelengths.size == band_count:
+        return wavelengths
+    return None
+
+
+def default_false_color_bands(dataset_key: str | None, band_count: int) -> tuple[int, int, int]:
+    """Return 1-based RGB band numbers with a dataset-aware Salinas default."""
+    if dataset_key == "salinas" and band_count >= 57:
+        # NIR, red and green bands: vegetation appears bright in the red channel.
+        return 57, 27, 17
+    return auto_rgb_bands(band_count)
+
+
+def band_wavelength_labels(
+    dataset_key: str | None,
+    bands_1based: tuple[int, int, int],
+    band_count: int,
+) -> list[str]:
+    wavelengths = salinas_corrected_wavelengths_nm(band_count) if dataset_key == "salinas" else None
+    labels = []
+    for band in bands_1based:
+        if wavelengths is not None and 1 <= band <= len(wavelengths):
+            labels.append(f"{band} (~{wavelengths[band - 1]:.0f} nm)")
+        else:
+            labels.append(str(band))
+    return labels
+
+
+def spectral_axis(
+    dataset_key: str | None,
+    band_count: int,
+    prefer_wavelength: bool = True,
+) -> tuple[np.ndarray, str]:
+    """Return x-axis values and label for spectral plots."""
+    if prefer_wavelength and dataset_key == "salinas":
+        wavelengths = salinas_corrected_wavelengths_nm(band_count)
+        if wavelengths is not None:
+            return wavelengths, "Approximate wavelength (nm)"
+    return np.arange(1, band_count + 1), "Band number"
 
 
 def infer_dataset_key(*names: str) -> str | None:
